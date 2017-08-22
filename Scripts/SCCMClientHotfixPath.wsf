@@ -1,0 +1,431 @@
+<job id="SCCMClientHotfixPath">
+    <script language="VBScript" src="ZTIUtility.vbs"/>
+    <script language="VBScript">
+    
+'#########################################################################################
+'#   MICROSOFT LEGAL STATEMENT FOR SAMPLE SCRIPTS/CODE
+'#########################################################################################
+'#   This Sample Code is provided for the purpose of illustration only and is not 
+'#   intended to be used in a production environment.
+'#
+'#   THIS SAMPLE CODE AND ANY RELATED INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY 
+'#   OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED 
+'#   WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR PURPOSE.
+'#
+'#   We grant You a nonexclusive, royalty-free right to use and modify the Sample Code 
+'#   and to reproduce and distribute the object code form of the Sample Code, provided 
+'#   that You agree: 
+'#   (i)      to not use Our name, logo, or trademarks to market Your software product 
+'#            in which the Sample Code is embedded; 
+'#   (ii)     to include a valid copyright notice on Your software product in which 
+'#            the Sample Code is embedded; and 
+'#   (iii)    to indemnify, hold harmless, and defend Us and Our suppliers from and 
+'#            against any claims or lawsuits, including attorneys’ fees, that arise 
+'#            or result from the use or distribution of the Sample Code.
+'#########################################################################################
+
+' //***************************************************************************
+' // ***** Script Header *****
+' //
+' // Solution:  Custom script for the Microsoft Deployment Toolkit
+' // File:      SCCMClientHotfixPath.wsf
+' //
+' // Purpose:   To examine i386\hotfix folder in the ConfigMgr client installation
+' //            folder, generate the PATCH property based on the updates found,
+' //            and update the SMSClientInstallProperties varaible.
+' //
+' // Requirements: ZTIUtility.vbs v.6.1.2373.0 (MDT 2012 Update 1) or greater located
+' //               in the same folder.
+' //
+' // Usage:     cscript.exe SCCMClientHotfixPath.wsf
+' //
+' // Version:   1.1.4
+' //
+' // History:
+' // 1.0.0  11/21/2008  Created initial script.
+' // 1.0.1  11/24/2008  Changed to add PATCH= to string added to the 
+' //                    SCCMClientProperties.  Now adds the string to the
+' //                    beginning of SCCMClientProperties instead of using
+' //                    the <PATCH_VALUE> replacement placeholder.  This
+' //                    allows for the case of no patch .msp files present.
+' // 1.0.2  08/28/2010  Script now uses the ConfigMgr variable SMSClientInstallProperties
+' //                    instead of the custom variable SCCMClientProperties.
+' //                    Added support for Lite Touch Installation.  Also added
+' //                    double quotes around final patch list string.
+' // 1.0.3  --/--/----  Not used.
+' // 1.0.4  01/13/2011  Changed sSMSClientInstallProperties for installing Windows 
+' //                    with BDE partition.
+' // 1.1.0  09/25/2012  Updated to support ConfigMgr 2012 client updates.
+' // 1.1.1  10/09/2012  Updated to install updates in KB number order.
+' // 1.1.2  10/23/2012  Now copying hotfix folder in all scenarios.  Hotfix copy
+' //                    destination now oEnvironment.Item("OSDisk") & "\windows\temp\hotfix".
+' // 1.1.3  06/12/2013  Now checking that OSDisk has a value and if not, calling
+' //                    oUtility.GetOSTargetDriveLetterEx to try to set it.
+' // 1.1.4  07/02/2013  Now checking to see if OSDTargetSystemDrive has a value if
+' //                    oUtility.GetOSTargetDriveLetterEx did not return a value.
+' //
+' // ***** End Header *****
+' //***************************************************************************
+
+
+'//----------------------------------------------------------------------------
+'//
+'//  Global constant and variable declarations
+'//
+'//----------------------------------------------------------------------------
+
+'Option Explicit
+
+Dim iRetVal
+Dim sPatchValue
+
+sPatchValue = ""
+
+
+'//----------------------------------------------------------------------------
+'//  End declarations
+'//----------------------------------------------------------------------------
+
+
+'//----------------------------------------------------------------------------
+'//  Main routine
+'//----------------------------------------------------------------------------
+
+On Error Resume Next
+iRetVal = ZTIProcess
+ProcessResults iRetVal
+On Error Goto 0
+
+
+'//---------------------------------------------------------------------------
+'//
+'//  Function:    ZTIProcess()
+'//
+'//  Input:    None
+'// 
+'//  Return:    Success - 0
+'//        Failure - non-zero
+'//
+'//  Purpose:    Perform main ZTI processing
+'//        
+'//---------------------------------------------------------------------------
+Function ZTIProcess()
+
+    On Error Resume Next
+    
+    ZTIProcess = Success
+
+
+    'Exit if no updates source folder is found as there is no work to do.
+
+    sHotFixSourceFolder = GetClientUpdatesPath
+    If Not oFSO.FolderExists(sHotFixSourceFolder) Then
+        oLogging.CreateEntry "Hotfix source folder " & sHotFixSourceFolder & " not found.  Exiting script.", LogTypeInfo
+        Exit Function
+    End If 
+
+
+    'See if OSDisk variable is set.  If not, call GetOSTargetDriveLetterEx.
+    
+    oLogging.CreateEntry "Attempting to determine target drive using variable OSDisk.", LogTypeInfo
+    sOSDisk = oEnvironment.Item("OSDisk")
+    If sOSDisk = "" Then
+        oLogging.CreateEntry "OSDisk variable is not set.  Attempting to determine target drive using GetOSTargetDriveLetterEx.", LogTypeInfo
+        sOSDisk = oUtility.GetOSTargetDriveLetterEx(false)
+    End If
+
+
+    'See if sOSDisk is now set.  If not, try the variable OSDTargetSystemDrive.
+
+    If sOSDisk = "" Then
+        oLogging.CreateEntry "Determining target drive using GetOSTargetDriveLetterEx did not work. Now trying the variable OSDTargetSystemDrive.", LogTypeInfo
+        sOSDisk = oEnvironment.Item("OSDTargetSystemDrive")
+    End If
+
+    
+    'If sOSDisk is still blank, exit with error.
+    
+    If sOSDisk = "" Then
+        oLogging.CreateEntry "Unable to determine target drive.  Exiting script.", LogTypeError
+        ZTIProcess = Failure
+        Exit Function
+    Else
+        oLogging.CreateEntry "Target drive: " & sOSDisk, LogTypeInfo
+    End If
+
+
+    'Set update path
+
+    sHotFixFolder = sOSDisk & "\windows\temp\hotfix"
+    oLogging.CreateEntry "ConfigMgr Client hotfixes will be installed from : " & sHotFixFolder, LogTypeInfo
+
+
+    'Copy updates to target drive path
+
+    Err.Clear
+    oFSO.CopyFolder sHotFixSourceFolder, sHotFixFolder
+    If Err then
+        oLogging.CreateEntry "Error copying folder from " & sHotFixSourceFolder & " to " & sHotFixFolder & ": " & Err.Description & " (" & Err.Number & ")", LogTypeError
+        ZTIProcess = Failure
+        Exit Function
+    Else
+        oLogging.CreateEntry "Successfully copied source folder from " & sHotFixSourceFolder & " to " & sHotFixFolder, LogTypeInfo
+    End if
+
+
+    'Get the client install proerties
+
+    sSMSClientInstallProperties = oEnvironment.Item("SMSClientInstallProperties")
+    If sSMSClientInstallProperties = "" Then
+        oLogging.CreateEntry "SMSClientInstallProperties property not found.", LogTypeError
+        ZTIProcess = Failure
+        Exit Function
+    End If
+
+
+    'Examine the updates folder and build the PATCH paths
+
+    Set dicClientUpdates = CreateObject("Scripting.Dictionary")
+    dicClientUpdates.CompareMode = TextCompare
+
+    Set objTopFolder = oFSO.GetFolder(sHotFixFolder)
+    FindClientUpdates objTopFolder, dicClientUpdates
+    aClientUpdateKBNumbers = dicClientUpdates.Keys
+    aSortedUpdateKBNumbers = BubbleSortArray(aClientUpdateKBNumbers)
+
+    Dim aSortedUpdatePaths()
+    ReDim aSortedUpdatePaths(UBound(aSortedUpdateKBNumbers))
+    For i = 0 To UBound(aSortedUpdateKBNumbers)
+        oLogging.CreateEntry "Sorted Update " & i & ": KB" & aSortedUpdateKBNumbers(i) & " - " & dicClientUpdates.Item(aSortedUpdateKBNumbers(i)), LogTypeInfo
+        aSortedUpdatePaths(i) = dicClientUpdates.Item(aSortedUpdateKBNumbers(i))
+    Next
+
+    sPatchValue = Join(aSortedUpdatePaths, ";")
+    oLogging.CreateEntry "Constructed patch paths: " & sPatchValue, LogTypeInfo
+
+    If sPatchValue = "" Then
+        oLogging.CreateEntry "No patch .msp files found in hotfix source folder " & sHotFixSourceFolder & ".  Exiting script.", LogTypeInfo
+        Exit Function
+    End If
+
+
+    ' Drive letter may not be correct in WinPE if BDE partition exists.  Change drive letter back to C:.
+
+    sHotFixDrive = oFSO.GetDriveName(sHotFixFolder)
+    
+    If sHotFixDrive = "C:" Then
+        sPatchValueFinal = sPatchValue
+        oLogging.CreateEntry "Value: " & sPatchValue & " contains correct path", LogTypeInfo
+    Else
+        sReplaceString = "C:"
+        sPatchValueFinal = oRegEx.ReplaceRegEx ( sHotFixDrive, sReplaceString, sPatchValue ) 
+        oLogging.CreateEntry "Changed " & sPatchValue & " to " & sPatchValueFinal, LogTypeInfo		
+    End If
+
+
+    ' Set the final PATCH property and update the SMSClientInstallProperties variable
+
+    sSMSClientInstallPropertiesFinal = "PATCH=""" & sPatchValueFinal & """ " & sSMSClientInstallProperties
+    oLogging.CreateEntry "Final SMSClientInstallProperties property value: " & sSMSClientInstallPropertiesFinal, LogTypeInfo
+    oEnvironment.Item("SMSClientInstallProperties") = sSMSClientInstallPropertiesFinal
+    oLogging.CreateEntry "Updated SMSClientInstallProperties Environment Item.", LogTypeInfo
+    
+End Function
+
+
+Sub FindClientUpdates(objToplFolder, ByRef dicUpdates)
+
+    For Each file In objToplFolder.files
+        strCurrentFileExt = oFSO.GetExtensionName(file)
+        If LCase(strCurrentFileExt) = LCase("msp") Then
+            strCurrentFileBaseName = oFSO.GetBaseName(file) 
+            lKBNumber = CLng(GetUpdateKBNumber(strCurrentFileBaseName))
+            oLogging.CreateEntry "Found Update" &": KB" & lKBNumber & " - " & file.Path, LogTypeInfo
+            dicUpdates.Add lKBNumber, file.Path
+        End If
+    Next
+
+    For Each subfolder in objToplFolder.subfolders
+        FindClientUpdates subfolder, dicUpdates
+    Next
+
+End Sub
+
+
+Function GetUpdateKBNumber(sUpdateFileName)
+
+    GetUpdateKBNumber = ""
+
+    Set colMatches = oRegEx.GetRegExMatches("[kK][bB](\d+)", sUpdateFileName)
+
+    If colMatches.Count > 0 Then
+        For i = 0 To (colMatches.Count - 1)
+            sMatch = colMatches(i).Value
+            'oLogging.CreateEntry "Pattern Match " & i & " = " & sMatch, LogTypeInfo
+            If colMatches(i).SubMatches.Count > 0 Then
+                For j = 0 To (colMatches(i).SubMatches.Count - 1)
+                    sSubMatch = colMatches(i).SubMatches(j)
+                    'oLogging.CreateEntry "Pattern SubMatch " & j & " = " & sSubMatch, LogTypeInfo
+                    GetUpdateKBNumber = sSubMatch
+                Next
+            Else
+                oLogging.CreateEntry "No Pattern SubMatch.", LogTypeError
+            End If
+        Next
+    Else
+        oLogging.CreateEntry "No Pattern Match.", LogTypeError
+    End If
+
+End Function
+
+
+Function GetWmiPropertyValue(strNameSpace, strClassName, strPropertyName, strWhereClause, blnConvertWMIDateToVBDate)
+
+    On Error Resume Next
+
+    strPropertyValue = ""
+    sLogLinePrefix = "GetWmiPropertyValue: "
+
+    oLogging.CreateEntry sLogLinePrefix & "Input paramter - WMI namespace: " & strNameSpace, LogTypeInfo
+    oLogging.CreateEntry sLogLinePrefix & "Input paramter - WMI class name: " & strClassName, LogTypeInfo
+    oLogging.CreateEntry sLogLinePrefix & "Input paramter - WMI class property name: " & strPropertyName, LogTypeInfo
+    oLogging.CreateEntry sLogLinePrefix & "Input paramter - WMI Where clause: " & strWhereClause, LogTypeInfo
+    oLogging.CreateEntry sLogLinePrefix & "Input paramter - Convert Date properties to VB Date: " & CStr(blnConvertWMIDateToVBDate), LogTypeInfo
+
+    set oWmiClass = getobject("winmgmts:" & strNameSpace).get(strClassName,&h20000) 'amended
+    set oWmiProperties = oWmiClass.Properties_
+
+    Set objWMIService = GetObject("winmgmts:\\" & "." & "\" & strNameSpace)
+    If strWhereClause <> "" Then
+        Set colItems = objWMIService.ExecQuery("Select * from " & strClassName & " where " & strWhereClause,,48)
+    Else
+        Set colItems = objWMIService.ExecQuery("Select * from " & strClassName,,48)
+    End If
+
+    For Each objItem in colItems
+        For Each objProperty in oWmiProperties
+            sLine = ""
+            'WScript.Echo "- " & objProperty.name & ": " & strPropertyName
+
+            If objProperty.Name = strPropertyName Then
+                If objProperty.IsArray = True Then
+                    sLine = "str" & objProperty.Name & " = Join(objItem." & objProperty.Name & ", " & Chr(34) & "," & Chr(34) & ")" & vbCrLf
+                    sLine = sLine & "strPropertyValue =  str" & objProperty.Name
+                ElseIf objProperty.CIMTYPE = 101 Then
+                    bHasDates = True
+                    If blnConvertWMIDateToVBDate Then
+                        sLine =  "strPropertyValue =  WMIDateStringToDate(objItem." & objProperty.Name & ")"
+                    Else
+                        sLine =  "strPropertyValue =  objItem." & objProperty.Name
+                    End If
+                Else
+                    sLine =  "strPropertyValue =  objItem." & objProperty.Name
+                End If
+
+                'WScript.Echo sLine
+                Execute sLine
+            End If
+
+        Next
+    Next
+
+    oLogging.CreateEntry sLogLinePrefix & "Return value: " & strPropertyValue, LogTypeInfo
+    GetWmiPropertyValue = strPropertyValue
+
+End Function
+
+
+Function GetFileversionForProcessExecutable(sProcessName)
+
+    sLogLinePrefix = "GetFileversionForProcessExecutable: "
+    
+    GetFileversionForProcessExecutable = ""
+
+    sExecutablePath = GetWmiPropertyValue("root\cimv2", "Win32_Process", "ExecutablePath", "Name = '" & sProcessName & "'", False)
+    
+    If sExecutablePath <> "" Then
+        If oFSO.FileExists(sExecutablePath) Then
+            sFileVersion = oFSO.GetFileVersion (sExecutablePath)
+        Else
+            oLogging.CreateEntry sLogLinePrefix & "File not found: " & sExecutablePath, LogTypeError
+        End If
+    Else
+        oLogging.CreateEntry sLogLinePrefix & "Process executable path not found for " & sProcessName, LogTypeError
+    End If
+
+    GetFileversionForProcessExecutable = sFileVersion
+
+End Function
+
+
+Function GetClientUpdatesPath()
+
+    GetClientUpdatesPath = ""
+
+    ' Check for whether we're installing in the CM2007 or CM2012 client
+
+    sCcmsetupVersion = oFSO.GetFileVersion (oUtility.ScriptDir & "\ccmsetup.exe")
+    iCcmsetupMajorVersion = Left(sCcmsetupVersion, InStr(1, sCcmsetupVersion, ".", vbTextCompare) - 1)
+    oLogging.CreateEntry "Ccmsetup.exe major version: " & iCcmsetupMajorVersion, LogTypeInfo
+    
+    If iCcmsetupMajorVersion < 5 Then
+        oLogging.CreateEntry "Installing ConfigMgr 2007 client.", LogTypeInfo
+
+        ' Running in CM 2007 or earlier.  Client is x86 only.
+        
+        sUpdatesPath = oUtility.ScriptDir & "\i386\hotfix"
+    Else
+        oLogging.CreateEntry "Installing ConfigMgr 2012 or higher client.", LogTypeInfo
+
+		' Figure out the right platform of updates to use.  (The OSArchitecture variable is set during ConfigMgr 
+		' deployments based on the OS being installed.  It is set by the "Apply Operating System" step
+		' regardless of whether an OS image package or OS install package is being used.
+        ' For Lite Touch, use the ImageProcessor variable (set to either "x86" or "x64").) 
+
+		If UCase(oEnvironment.Item("OSArchitecture")) = "AMD64" or UCase(oEnvironment.Item("OSArchitecture")) = "X64" or UCase(oEnvironment.Item("ImageProcessor")) = "X64" then
+			sPlatform = "amd64"
+			sUpdatesPath = oUtility.ScriptDir & "\x64\hotfix"
+		ElseIf UCase(oEnvironment.Item("ARCHITECTURE")) = "X64" then
+			sPlatform = "amd64"
+			sUpdatesPath = oUtility.ScriptDir & "\x64\hotfix"
+		Else
+			sPlatform = "x86"
+			sUpdatesPath = oUtility.ScriptDir & "\i386\hotfix"
+		End if
+		oLogging.CreateEntry "ConfigMgr client being installed requires " & sPlatform & " updates.", LogTypeInfo
+    End If
+
+    oLogging.CreateEntry "Hotfix source folder: " & sUpdatesPath, LogTypeInfo
+    GetClientUpdatesPath = sUpdatesPath
+
+End Function
+
+
+Function WMIDateStringToDate(dtmDate)
+    'WScript.Echo dtm: 
+    WMIDateStringToDate = CDate(Mid(dtmDate, 5, 2) & "/" & _
+        Mid(dtmDate, 7, 2) & "/" & Left(dtmDate, 4) _
+        & " " & Mid (dtmDate, 9, 2) & ":" & Mid(dtmDate, 11, 2) & ":" & Mid(dtmDate,13, 2))
+End Function
+
+
+Function BubbleSortArray(arrInput)
+
+    arrSort = arrInput
+    
+    for i = UBound(arrSort) - 1 To 0 Step -1
+        for j= 0 to i
+            if arrSort(j)>arrSort(j+1) then
+                temp=arrSort(j+1)
+                arrSort(j+1)=arrSort(j)
+                arrSort(j)=temp
+            end if
+        next
+    next
+
+    BubbleSortArray = arrSort
+
+End Function
+
+    </script>
+</job>

@@ -1,0 +1,23 @@
+New-ADUser –GivenName "Firstname" –Surname "Lastname" –DisplayName "Firstname Lastname" –Name "Firstname Lastname" –SamAccountName "Firstname.Lastname" –UserPrincipalName "Firstname.Lastname@corp.viamonstra.com" –Path "OU=Users,OU=ViaMonstra,DC=corp,DC=viamonstra,DC=com" –Verbose
+
+Set-ADAccountPassword –Identity:"CN=Firstname Lastname,OU=Users,OU=ViaMonstra,DC=corp,DC=viamonstra,DC=com" –NewPassword:(ConvertTo-SecureString -String "P@ssw0rd" –AsPlainText –Force) –Reset:$true -Verbose
+
+Enable-ADAccount –Identity:"CN=Firstname Lastname,OU=Users,OU=ViaMonstra,DC=corp,DC=viamonstra,DC=com" –Verbose
+
+Set-ADUser –ChangePasswordAtLogon:$true –Identity:"CN=Firstname Lastname,OU=Users,OU=ViaMonstra,DC=corp,DC=viamonstra,DC=com" –Verbose
+
+Save-Help –DestinationPath C:\Setup\PowerShell-Helpfiles\
+
+Update-Help –SourcePath C:\Setup\PowerShell-Helpfiles\
+
+Get-FileHash -Path C:\Windows\System32\Drivers\etc\hosts
+
+Get-FileHash -Path C:\Windows\System32\Drivers\etc\hosts -Algorithm SHA512
+
+Get-FileHash -Path C:\Windows\System32\Drivers\etc\hosts -Algorithm MD5
+
+Test-NetConnection -ComputerName localhost -Por 10243
+
+Test-NetConnection -ComputerName www.microsoft.com -CommonTCPPort HTTP
+
+Test-NetConnection –InformationLevel Detailed 
